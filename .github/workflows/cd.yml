@@ -73,40 +73,44 @@ jobs:
   deploy-ecs:
     needs: task-def
     runs-on: ubuntu-latest
+    outputs:
+      task_def_arn: ${{ needs.task-def.outputs.task_def_arn }}
     steps:
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
     
-    - name: Deploy ECS Service
-      run: |
-        echo "Using task definition ARN: ${{ steps.register-task-def.outputs.task_def_arn }}"
+      - name: Deploy ECS Service
+        run: |
+          # Get task definition ARN from previous job
+          TASK_DEF_ARN="${{ needs.task-def.outputs.task_def_arn }}"
+          echo "Using task definition ARN: ${TASK_DEF_ARN}"
           
-        # Improved service existence check
-        SERVICE_EXISTS=$(aws ecs describe-services \
-          --cluster xgboost-ecr \
-          --services bankloan-model-service \
-          --query 'services[?status!=`INACTIVE`].status' \
-          --output text || echo "INACTIVE")
+          # Improved service existence check
+          SERVICE_EXISTS=$(aws ecs describe-services \
+            --cluster xgboost-ecr \
+            --services bankloan-model-service \
+            --query 'services[?status!=`INACTIVE`].status' \
+            --output text || echo "INACTIVE")
 
-        if [ "$SERVICE_EXISTS" = "INACTIVE" ]; then
-          echo "Creating new ECS service..."
-          aws ecs create-service \
-            --cluster xgboost-ecr \
-            --service-name bankloan-model-service \
-            --task-definition ${{ needs.task-def.outputs.task_def_arn }} \
-            --desired-count 1 \
-            --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_ID }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}"
-        else
-          echo "Updating existing ECS service..."
-          aws ecs update-service \
-            --cluster xgboost-ecr \
-            --service-name bankloan-model-service \
-            --task-definition ${{ needs.task-def.outputs.task_def_arn }} \
-            --force-new-deployment \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_ID }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}"
-        fi
+          if [ "$SERVICE_EXISTS" = "INACTIVE" ]; then
+            echo "Creating new ECS service..."
+            aws ecs create-service \
+              --cluster xgboost-ecr \
+              --service-name bankloan-model-service \
+              --task-definition "${TASK_DEF_ARN}" \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_ID }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}"
+          else
+            echo "Updating existing ECS service..."
+            aws ecs update-service \
+              --cluster xgboost-ecr \
+              --service-name bankloan-model-service \
+              --task-definition "${TASK_DEF_ARN}" \
+              --force-new-deployment \
+              --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.SUBNET_ID }}],securityGroups=[${{ secrets.SECURITY_GROUP_ID }}],assignPublicIp=ENABLED}"
+          fi
